@@ -367,6 +367,22 @@ PrefabInstance:
       propertyPath: m_LocalEulerAnglesHint.z
       value: 0
       objectReference: {fileID: 0}
+    - target: {fileID: -6272528198361130259, guid: c724d6264e3f6964da9764cbd7ab308e, type: 3}
+      propertyPath: m_LocalRotation.w
+      value: -0.6344658
+      objectReference: {fileID: 0}
+    - target: {fileID: -6272528198361130259, guid: c724d6264e3f6964da9764cbd7ab308e, type: 3}
+      propertyPath: m_LocalRotation.x
+      value: -0.032703817
+      objectReference: {fileID: 0}
+    - target: {fileID: -6272528198361130259, guid: c724d6264e3f6964da9764cbd7ab308e, type: 3}
+      propertyPath: m_LocalRotation.y
+      value: -0.70857304
+      objectReference: {fileID: 0}
+    - target: {fileID: -6272528198361130259, guid: c724d6264e3f6964da9764cbd7ab308e, type: 3}
+      propertyPath: m_LocalRotation.z
+      value: 0.30709583
+      objectReference: {fileID: 0}
     - target: {fileID: 65702495048144492, guid: c724d6264e3f6964da9764cbd7ab308e, type: 3}
       propertyPath: m_IsActive
       value: 0
@@ -411,6 +427,7 @@ MonoBehaviour:
   loop: 1
   fingerMaxFlex: 100
   fingerMaxExtension: 15
+  positionScale: 0
 --- !u!114 &1265581574
 MonoBehaviour:
   m_ObjectHideFlags: 0

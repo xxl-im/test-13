@@ -312,7 +312,7 @@ public class BonePositionVisualizer : MonoBehaviour
 
         _playbackTime += Time.deltaTime;
 
-        float animDuration = _animData.total_frames / _animData.fps;
+        float animDuration = _animData.frames[_animData.frames.Length - 1].timestamp;
         if (_playbackTime >= animDuration)
             _playbackTime = Mathf.Repeat(_playbackTime, animDuration);
 

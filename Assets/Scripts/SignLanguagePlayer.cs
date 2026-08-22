@@ -30,6 +30,10 @@ public class SignLanguagePlayer : MonoBehaviour
     [Range(0, 90)]
     public float fingerMaxExtension = 15f;
 
+    [Header("Position")]
+    [Tooltip("Scale for position deltas from JSON local_position data. 0 = ignore position data.")]
+    public float positionScale = 0f;
+
     // Parsed data
     private AnimData _animData;
     private float _playbackTime;
@@ -40,6 +44,7 @@ public class SignLanguagePlayer : MonoBehaviour
 
     // Unity rest pose (for reset)
     private readonly Dictionary<Transform, Quaternion> _initialLocalRotations = new Dictionary<Transform, Quaternion>();
+    private readonly Dictionary<Transform, Vector3> _initialLocalPositions = new Dictionary<Transform, Vector3>();
 
     // HumanBodyBones name -> Rigify DEF- bone name (mesh is skinned to rig, not metarig)
     private static readonly Dictionary<string, string> BoneNameRemap = new Dictionary<string, string>
@@ -87,6 +92,9 @@ public class SignLanguagePlayer : MonoBehaviour
 
     // JSON frame-0 baseline rotations (for delta computation)
     private readonly Dictionary<string, Quaternion> _jsonFrame0Rotations = new Dictionary<string, Quaternion>();
+
+    // JSON frame-0 baseline positions (for delta computation)
+    private readonly Dictionary<string, Vector3> _jsonFrame0Positions = new Dictionary<string, Vector3>();
 
     #region JSON Data Structures
 
@@ -157,10 +165,14 @@ public class SignLanguagePlayer : MonoBehaviour
 
         foreach (var kvp in _initialLocalRotations)
             if (kvp.Key != null) kvp.Key.localRotation = kvp.Value;
+        foreach (var kvp in _initialLocalPositions)
+            if (kvp.Key != null) kvp.Key.localPosition = kvp.Value;
 
         _initialLocalRotations.Clear();
+        _initialLocalPositions.Clear();
         _boneMap.Clear();
         _jsonFrame0Rotations.Clear();
+        _jsonFrame0Positions.Clear();
 
         LoadAndBuild(absolutePath);
         RecordInitialState();
@@ -172,7 +184,7 @@ public class SignLanguagePlayer : MonoBehaviour
 
         _playbackTime += Time.deltaTime;
 
-        float animDuration = _animData.total_frames / _animData.fps;
+        float animDuration = _animData.frames[_animData.frames.Length - 1].timestamp;
         if (_playbackTime >= animDuration)
         {
             if (loop)
@@ -267,6 +279,7 @@ public class SignLanguagePlayer : MonoBehaviour
             var bone = kvp.Value;
             if (bone == null || recorded.Contains(bone)) continue;
             _initialLocalRotations[bone] = bone.localRotation;
+            _initialLocalPositions[bone] = bone.localPosition;
             recorded.Add(bone);
         }
         Debug.Log($"[SignLanguagePlayer] Recorded initial state for {recorded.Count} bones");
@@ -275,6 +288,7 @@ public class SignLanguagePlayer : MonoBehaviour
     private void RecordJsonFrame0()
     {
         _jsonFrame0Rotations.Clear();
+        _jsonFrame0Positions.Clear();
         if (_animData?.frames == null || _animData.frames.Length == 0) return;
 
         foreach (var bp in _animData.frames[0].bone_poses)
@@ -284,8 +298,12 @@ public class SignLanguagePlayer : MonoBehaviour
                 _jsonFrame0Rotations[bp.bone_name] = new Quaternion(
                     bp.local_rotation[0], bp.local_rotation[1],
                     bp.local_rotation[2], bp.local_rotation[3]);
+            if (bp.local_position != null && bp.local_position.Length >= 3)
+                _jsonFrame0Positions[bp.bone_name] = new Vector3(
+                    bp.local_position[0], bp.local_position[1],
+                    bp.local_position[2]);
         }
-        Debug.Log($"[SignLanguagePlayer] Recorded JSON frame-0 baseline for {_jsonFrame0Rotations.Count} bones");
+        Debug.Log($"[SignLanguagePlayer] Recorded JSON frame-0 baseline: {_jsonFrame0Rotations.Count} rotations, {_jsonFrame0Positions.Count} positions");
     }
 
     private void BuildBoneMap()
@@ -394,21 +412,10 @@ public class SignLanguagePlayer : MonoBehaviour
                 bool isArmBone = bp0.bone_name == "LeftUpperArm"  || bp0.bone_name == "LeftLowerArm" || bp0.bone_name == "LeftHand"
                               || bp0.bone_name == "RightUpperArm" || bp0.bone_name == "RightLowerArm" || bp0.bone_name == "RightHand";
 
-                if (isArmBone)
-                {
-                    // DEF- arm bones have ~90° Y rest rotation, so their local axes
-                    // are rotated relative to standard Humanoid:
-                    //   Right arm: DEF X=down, DEF Y=right, DEF Z=forward
-                    //   Left arm:  DEF X=up,   DEF Y=left,  DEF Z=forward
-                    // Standard Humanoid: X=forward, Y=up, Z=right
-                    // Mapping std→DEF for right: X→Z, Y→-X, Z→Y => delta_def = (-y, z, x, w)
-                    // Mapping std→DEF for left:  X→Z, Y→X,  Z→Y => delta_def = (y, z, x, w)
-                    if (bp0.bone_name.StartsWith("Right"))
-                        delta = new Quaternion(-delta.y, delta.z, delta.x, delta.w);
-                    else
-                        delta = new Quaternion(delta.y, delta.z, delta.x, delta.w);
-                }
-                else if (IsFingerBone(bp0.bone_name))
+                // Arm bones: delta is in Unity world space (no Python x/z swap)
+                // Applied as delta * restRot so the world-space delta composes correctly
+                // with the bone's rest pose
+                if (IsFingerBone(bp0.bone_name))
                 {
                     // Clamp finger rotation: prevent over-bending and backward bending.
                     // The finger flexes around its local Z axis (pointing sideways when
@@ -417,11 +424,28 @@ public class SignLanguagePlayer : MonoBehaviour
                     delta = clampFingerRotation(delta, bp0.bone_name);
                 }
 
-                // Compose with rest pose
+                // Compose with rest pose (delta * restRot for world-space delta)
                 if (_initialLocalRotations.TryGetValue(bone, out var restRot))
-                    bone.localRotation = restRot * delta;
+                    bone.localRotation = delta * restRot;
                 else
                     bone.localRotation = delta;
+            }
+
+            // Apply position delta (if enabled and data exists)
+            if (positionScale > 0f && bp0.local_position != null && bp0.local_position.Length >= 3
+                && _initialLocalPositions.TryGetValue(bone, out var restPos))
+            {
+                var p0 = new Vector3(bp0.local_position[0], bp0.local_position[1], bp0.local_position[2]);
+                var p1 = bp1.local_position != null
+                    ? new Vector3(bp1.local_position[0], bp1.local_position[1], bp1.local_position[2])
+                    : p0;
+                var jsonPos = Vector3.Lerp(p0, p1, t);
+
+                if (_jsonFrame0Positions.TryGetValue(bp0.bone_name, out var frame0Pos))
+                {
+                    var delta = jsonPos - frame0Pos;
+                    bone.localPosition = restPos + delta * positionScale;
+                }
             }
 
             writtenBones.Add(bone);
