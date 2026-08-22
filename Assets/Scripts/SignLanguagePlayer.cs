@@ -21,6 +21,10 @@ public class SignLanguagePlayer : MonoBehaviour
     public bool playOnStart = true;
     public bool loop = true;
 
+    [Header("Position-Based Driving")]
+    [Tooltip("If true, main body bones (spine + arms) are driven by JSON local_position data (direction-based), not rotation. This is more accurate than rotation-based driving.")]
+    public bool usePositionBasedRotation = true;
+
     [Header("Finger Constraints")]
     [Tooltip("Max finger curl angle in degrees (prevents over-bending). 0 = disabled.")]
     [Range(0, 180)]
@@ -45,6 +49,13 @@ public class SignLanguagePlayer : MonoBehaviour
     // Unity rest pose (for reset)
     private readonly Dictionary<Transform, Quaternion> _initialLocalRotations = new Dictionary<Transform, Quaternion>();
     private readonly Dictionary<Transform, Vector3> _initialLocalPositions = new Dictionary<Transform, Vector3>();
+
+    // Rest world rotations (for position-based driving)
+    private readonly Dictionary<string, Quaternion> _restWorldRotations = new Dictionary<string, Quaternion>();
+
+    // Rest bone directions in world space (from parent bone to this bone, at T-pose)
+    // Used to compute absolute rotation from JSON positions (not delta)
+    private readonly Dictionary<string, Vector3> _restBoneDirections = new Dictionary<string, Vector3>();
 
     // HumanBodyBones name -> Rigify DEF- bone name (mesh is skinned to rig, not metarig)
     private static readonly Dictionary<string, string> BoneNameRemap = new Dictionary<string, string>
@@ -83,11 +94,17 @@ public class SignLanguagePlayer : MonoBehaviour
         { "RightLittleIntermediate", "DEF-f_pinky.02.R" },
     };
 
-    // Bones that need axis correction (arm bones with ~90° Y rest rotation)
-    private static readonly HashSet<string> AxisCorrectedBones = new HashSet<string>
-    {
-        "LeftUpperArm", "LeftLowerArm", "LeftHand",
-        "RightUpperArm", "RightLowerArm", "RightHand",
+    // Bone segments for position-based driving: (jsonBoneName, fromBoneName, toBoneName)
+    // The direction is computed as: normalize(toPos - fromPos)
+    private static readonly (string bone, string from, string to)[] PositionSegments = {
+        ("Chest",         "Hips",           "Chest"),
+        ("Neck",          "Chest",          "Neck"),
+        ("LeftUpperArm",  "LeftUpperArm",   "LeftLowerArm"),
+        ("LeftLowerArm",  "LeftLowerArm",   "LeftHand"),
+        ("LeftHand",      "LeftLowerArm",   "LeftHand"),
+        ("RightUpperArm", "RightUpperArm",  "RightLowerArm"),
+        ("RightLowerArm", "RightLowerArm",  "RightHand"),
+        ("RightHand",     "RightLowerArm",  "RightHand"),
     };
 
     // JSON frame-0 baseline rotations (for delta computation)
@@ -170,6 +187,8 @@ public class SignLanguagePlayer : MonoBehaviour
 
         _initialLocalRotations.Clear();
         _initialLocalPositions.Clear();
+        _restWorldRotations.Clear();
+        _restBoneDirections.Clear();
         _boneMap.Clear();
         _jsonFrame0Rotations.Clear();
         _jsonFrame0Positions.Clear();
@@ -282,6 +301,31 @@ public class SignLanguagePlayer : MonoBehaviour
             _initialLocalPositions[bone] = bone.localPosition;
             recorded.Add(bone);
         }
+
+        // Record rest world rotations for position-based driving
+        _restWorldRotations.Clear();
+        foreach (var kvp in _boneMap)
+        {
+            if (!_restWorldRotations.ContainsKey(kvp.Key))
+                _restWorldRotations[kvp.Key] = kvp.Value.rotation;
+        }
+
+        // Record rest bone directions for absolute position-based driving
+        // Direction = normalize(toBoneWorldPos - fromBoneWorldPos) at rest pose
+        _restBoneDirections.Clear();
+        foreach (var (boneName, fromName, toName) in PositionSegments)
+        {
+            if (!_boneMap.TryGetValue(fromName, out var fromBone)) continue;
+            if (!_boneMap.TryGetValue(toName, out var toBone)) continue;
+            Vector3 dir = toBone.position - fromBone.position;
+            if (dir.sqrMagnitude > 1e-10f)
+            {
+                dir.Normalize();
+                _restBoneDirections[boneName] = dir;
+            }
+        }
+        Debug.Log($"[SignLanguagePlayer] Recorded {_restBoneDirections.Count} rest bone directions");
+
         Debug.Log($"[SignLanguagePlayer] Recorded initial state for {recorded.Count} bones");
     }
 
@@ -371,6 +415,113 @@ public class SignLanguagePlayer : MonoBehaviour
 
         if (f0?.bone_poses == null) return;
 
+        if (usePositionBasedRotation)
+        {
+            ApplyPositionBasedFrame(f0, f1, t, f1Lookup);
+            return;
+        }
+
+        ApplyRotationBasedFrame(f0, f1, t, f1Lookup);
+    }
+
+    /// <summary>
+    /// Position-based driving: uses JSON local_position data to compute bone directions,
+    /// then sets bone world rotations directly. More accurate than rotation-based
+    /// because it bypasses the coordinate system mismatch between MediaPipe and DEF- bones.
+    /// Only applies to bones that HAVE local_position data; others fall back to rotation.
+    /// </summary>
+    private void ApplyPositionBasedFrame(Frame f0, Frame f1, float t, Dictionary<string, BonePose> f1Lookup)
+    {
+        // Collect interpolated JSON positions and rotations for this frame
+        var jsonPos = new Dictionary<string, Vector3>();
+        foreach (var bp0 in f0.bone_poses)
+        {
+            if (string.IsNullOrEmpty(bp0.bone_name)) continue;
+            if (bp0.local_position == null || bp0.local_position.Length < 3) continue;
+
+            var p0 = new Vector3(bp0.local_position[0], bp0.local_position[1], bp0.local_position[2]);
+            f1Lookup.TryGetValue(bp0.bone_name, out var bp1);
+            var p1 = bp1?.local_position != null
+                ? new Vector3(bp1.local_position[0], bp1.local_position[1], bp1.local_position[2])
+                : p0;
+            jsonPos[bp0.bone_name] = Vector3.Lerp(p0, p1, t);
+        }
+
+        var writtenBones = new HashSet<Transform>();
+
+        // 1. Drive main body bones using position-based directions (where data exists)
+        foreach (var (boneName, fromName, toName) in PositionSegments)
+        {
+            if (!_boneMap.TryGetValue(boneName, out var bone)) continue;
+            if (writtenBones.Contains(bone)) continue;
+            if (!_restWorldRotations.TryGetValue(boneName, out var restWorldRot)) continue;
+
+            // Check if we have position data for this segment
+            if (!jsonPos.ContainsKey(toName) || !jsonPos.ContainsKey(fromName))
+                continue; // Skip — will be handled by rotation fallback
+
+            // Also need the rest bone direction (character's actual T-pose direction)
+            if (!_restBoneDirections.TryGetValue(boneName, out var restDir))
+                continue;
+
+            var toPos = jsonPos[toName];
+            var fromPos = jsonPos[fromName];
+
+            // Current direction from JSON positions (in Unity space)
+            Vector3 jsonDir = toPos - fromPos;
+            if (jsonDir.sqrMagnitude < 1e-10f) continue;
+            jsonDir.Normalize();
+
+            // Absolute rotation: rotate from character's rest bone direction to JSON direction
+            // This makes the bone point in the direction specified by JSON, regardless of rest pose
+            Quaternion delta = Quaternion.FromToRotation(restDir, jsonDir);
+            bone.rotation = delta * restWorldRot;
+
+            writtenBones.Add(bone);
+        }
+
+        // 2. For remaining bones (no position data, or finger bones), use rotation-based approach
+        foreach (var bp0 in f0.bone_poses)
+        {
+            if (string.IsNullOrEmpty(bp0.bone_name)) continue;
+            if (!_boneMap.TryGetValue(bp0.bone_name, out var bone)) continue;
+            if (writtenBones.Contains(bone)) continue;
+
+            f1Lookup.TryGetValue(bp0.bone_name, out var bp1);
+            bp1 = bp1 ?? bp0;
+
+            if (bp0.local_rotation == null || bp0.local_rotation.Length < 4) continue;
+
+            var q0 = new Quaternion(bp0.local_rotation[0], bp0.local_rotation[1],
+                                     bp0.local_rotation[2], bp0.local_rotation[3]);
+            var q1 = bp1.local_rotation != null
+                ? new Quaternion(bp1.local_rotation[0], bp1.local_rotation[1],
+                                 bp1.local_rotation[2], bp1.local_rotation[3])
+                : q0;
+
+            var jsonRot = Quaternion.Slerp(q0, q1, t);
+
+            Quaternion delta = jsonRot;
+            if (_jsonFrame0Rotations.TryGetValue(bp0.bone_name, out var frame0Rot))
+                delta = Quaternion.Inverse(frame0Rot) * jsonRot;
+
+            if (IsFingerBone(bp0.bone_name))
+                delta = clampFingerRotation(delta, bp0.bone_name);
+
+            if (_initialLocalRotations.TryGetValue(bone, out var restRot))
+                bone.localRotation = delta * restRot;
+            else
+                bone.localRotation = delta;
+
+            writtenBones.Add(bone);
+        }
+    }
+
+    /// <summary>
+    /// Rotation-based driving (original approach). Used when usePositionBasedRotation is false.
+    /// </summary>
+    private void ApplyRotationBasedFrame(Frame f0, Frame f1, float t, Dictionary<string, BonePose> f1Lookup)
+    {
         var writtenBones = new HashSet<Transform>();
 
         foreach (var bp0 in f0.bone_poses)
@@ -382,13 +533,6 @@ public class SignLanguagePlayer : MonoBehaviour
             f1Lookup.TryGetValue(bp0.bone_name, out var bp1);
             bp1 = bp1 ?? bp0;
 
-            // Apply rotation using delta-from-frame0 approach:
-            //   delta = Inv(jsonFrame0Rot) * jsonRot
-            //   finalRot = restRot * axisCorrection * delta
-            //
-            // This extracts only the animation motion (relative to frame 0) and
-            // composes it with the DEF bone's rest pose. The axisCorrection
-            // converts the delta from standard Humanoid axes to DEF- bone axes.
             if (bp0.local_rotation != null && bp0.local_rotation.Length >= 4)
             {
                 var q0 = new Quaternion(bp0.local_rotation[0], bp0.local_rotation[1],
@@ -400,31 +544,13 @@ public class SignLanguagePlayer : MonoBehaviour
 
                 var jsonRot = Quaternion.Slerp(q0, q1, t);
 
-                // Compute delta from frame 0
                 Quaternion delta = jsonRot;
                 if (_jsonFrame0Rotations.TryGetValue(bp0.bone_name, out var frame0Rot))
                     delta = Quaternion.Inverse(frame0Rot) * jsonRot;
 
-                // Apply axis correction for ARM bones ONLY (upper arm / forearm / hand).
-                // NOTE: Hand-bone names match "RightHand"/"LeftHand" exactly. Finger bones
-                // (e.g. "RightThumbProximal") MUST NOT be remapped - their DEF- bones have
-                // ~identity rest orientation matching standard Humanoid axes.
-                bool isArmBone = bp0.bone_name == "LeftUpperArm"  || bp0.bone_name == "LeftLowerArm" || bp0.bone_name == "LeftHand"
-                              || bp0.bone_name == "RightUpperArm" || bp0.bone_name == "RightLowerArm" || bp0.bone_name == "RightHand";
-
-                // Arm bones: delta is in Unity world space (no Python x/z swap)
-                // Applied as delta * restRot so the world-space delta composes correctly
-                // with the bone's rest pose
                 if (IsFingerBone(bp0.bone_name))
-                {
-                    // Clamp finger rotation: prevent over-bending and backward bending.
-                    // The finger flexes around its local Z axis (pointing sideways when
-                    // the hand is at rest). We constrain that axis so fingers can only
-                    // curl toward the palm within a max angle.
                     delta = clampFingerRotation(delta, bp0.bone_name);
-                }
 
-                // Compose with rest pose (delta * restRot for world-space delta)
                 if (_initialLocalRotations.TryGetValue(bone, out var restRot))
                     bone.localRotation = delta * restRot;
                 else
@@ -461,11 +587,6 @@ public class SignLanguagePlayer : MonoBehaviour
 
     /// <summary>
     /// Clamp a finger joint's delta rotation to prevent over-bending and backward bending.
-    /// The delta is decomposed to angle-axis. The rotation axis is checked against the
-    /// local Z axis (standard Humanoid finger curl axis):
-    ///   Right hand: curl toward palm = +Z rotation (positive)
-    ///   Left hand:  curl toward palm = -Z rotation (positive, mirrored)
-    /// Flex (toward palm) is clamped to fingerMaxFlex, extension (backward) to fingerMaxExtension.
     /// </summary>
     private Quaternion clampFingerRotation(Quaternion delta, string boneName)
     {
@@ -477,17 +598,14 @@ public class SignLanguagePlayer : MonoBehaviour
 
         axis.Normalize();
         bool isRight = boneName.StartsWith("Right");
-        // In standard Humanoid: right hand curls around +Z, left hand around -Z
         Vector3 curlAxis = isRight ? Vector3.forward : Vector3.back;
         float dot = Vector3.Dot(axis, curlAxis);
-        // Positive dot = flex (toward palm), negative = extension (backward)
         float signedAngle = angle * (dot >= 0 ? 1f : -1f);
 
         float maxFlex = fingerMaxFlex > 0 ? fingerMaxFlex : 180f;
         float maxExt = fingerMaxExtension > 0 ? fingerMaxExtension : 0f;
         float clampedAngle = Mathf.Clamp(signedAngle, -maxExt, maxFlex);
 
-        // Reconstruct: use original axis direction, scaled by sign
         Vector3 finalAxis = axis * (signedAngle >= 0 ? 1f : -1f);
         if (finalAxis == Vector3.zero) finalAxis = curlAxis;
         return Quaternion.AngleAxis(Mathf.Abs(clampedAngle), finalAxis.normalized);

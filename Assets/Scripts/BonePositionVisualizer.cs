@@ -32,6 +32,10 @@ public class BonePositionVisualizer : MonoBehaviour
     [Tooltip("Show bone name labels in Scene view.")]
     public bool showLabels = true;
 
+    [Header("Character Bone Tracking")]
+    [Tooltip("If true, spheres are attached to the character's DEF- bones and follow them in real-time, instead of using JSON positions. Set rootOffset to (0,0,0).")]
+    public bool trackCharacterBones = false;
+
     private AnimData _animData;
     private float _playbackTime;
     private bool _isPlaying;
@@ -39,6 +43,43 @@ public class BonePositionVisualizer : MonoBehaviour
     private readonly Dictionary<string, Transform> _spheres = new Dictionary<string, Transform>();
     private readonly List<(LineRenderer lr, string parent, string child)> _lines = new List<(LineRenderer, string, string)>();
     private Transform _root;
+
+    // JSON bone name -> Rigify DEF- bone name (same mapping as SignLanguagePlayer)
+    private static readonly Dictionary<string, string> BoneNameRemap = new Dictionary<string, string>
+    {
+        { "Hips",            "DEF-spine.004" },
+        { "Spine",           "DEF-spine.004" },
+        { "Chest",           "DEF-spine.005" },
+        { "UpperChest",      "DEF-spine.005" },
+        { "Neck",            "DEF-spine.006" },
+        { "Head",            "DEF-spine.006" },
+        { "LeftUpperArm",    "DEF-upper_arm.L" },
+        { "LeftLowerArm",    "DEF-forearm.L" },
+        { "LeftHand",        "DEF-hand.L" },
+        { "RightUpperArm",   "DEF-upper_arm.R" },
+        { "RightLowerArm",   "DEF-forearm.R" },
+        { "RightHand",       "DEF-hand.R" },
+        { "LeftThumbProximal",      "DEF-thumb.01.L" },
+        { "LeftThumbIntermediate",  "DEF-thumb.02.L" },
+        { "LeftIndexProximal",      "DEF-f_index.01.L" },
+        { "LeftIndexIntermediate",  "DEF-f_index.02.L" },
+        { "LeftMiddleProximal",     "DEF-f_middle.01.L" },
+        { "LeftMiddleIntermediate", "DEF-f_middle.02.L" },
+        { "LeftRingProximal",       "DEF-f_ring.01.L" },
+        { "LeftRingIntermediate",   "DEF-f_ring.02.L" },
+        { "LeftLittleProximal",     "DEF-f_pinky.01.L" },
+        { "LeftLittleIntermediate", "DEF-f_pinky.02.L" },
+        { "RightThumbProximal",      "DEF-thumb.01.R" },
+        { "RightThumbIntermediate",  "DEF-thumb.02.R" },
+        { "RightIndexProximal",      "DEF-f_index.01.R" },
+        { "RightIndexIntermediate",  "DEF-f_index.02.R" },
+        { "RightMiddleProximal",     "DEF-f_middle.01.R" },
+        { "RightMiddleIntermediate", "DEF-f_middle.02.R" },
+        { "RightRingProximal",       "DEF-f_ring.01.R" },
+        { "RightRingIntermediate",   "DEF-f_ring.02.R" },
+        { "RightLittleProximal",     "DEF-f_pinky.01.R" },
+        { "RightLittleIntermediate", "DEF-f_pinky.02.R" },
+    };
 
     // JSON bone name -> parent JSON bone name (for finger hierarchy)
     private static readonly Dictionary<string, string> BoneParents = new Dictionary<string, string>
@@ -198,6 +239,12 @@ public class BonePositionVisualizer : MonoBehaviour
 
     private void CreateSpheres()
     {
+        if (trackCharacterBones)
+        {
+            CreateSpheresOnCharacterBones();
+            return;
+        }
+
         _root = new GameObject("DebugBones").transform;
         _root.SetParent(transform);
         _root.localPosition = rootOffset;
@@ -264,8 +311,71 @@ public class BonePositionVisualizer : MonoBehaviour
         Debug.Log($"[BonePositionVisualizer] Created {_spheres.Count} debug spheres.");
     }
 
+    /// <summary>
+    /// Creates spheres as children of the character's DEF- bones.
+    /// The spheres follow the bones in real-time, showing the actual model motion.
+    /// No JSON positions/rotations are applied — the bones are driven by SignLanguagePlayer.
+    /// </summary>
+    private void CreateSpheresOnCharacterBones()
+    {
+        var allTransforms = GetComponentsInChildren<Transform>(true);
+        var nameToTransform = new Dictionary<string, Transform>();
+        foreach (var t in allTransforms)
+        {
+            if (!nameToTransform.ContainsKey(t.name))
+                nameToTransform[t.name] = t;
+        }
+
+        // Collect all unique bone names from JSON
+        var boneNames = new HashSet<string>();
+        foreach (var frame in _animData.frames)
+        {
+            if (frame?.bone_poses == null) continue;
+            foreach (var bp in frame.bone_poses)
+                if (!string.IsNullOrEmpty(bp.bone_name))
+                    boneNames.Add(bp.bone_name);
+        }
+
+        int attached = 0, missing = 0;
+        var missingNames = new System.Collections.Generic.List<string>();
+
+        foreach (var jsonName in boneNames)
+        {
+            if (!BoneNameRemap.TryGetValue(jsonName, out var defName))
+            {
+                missing++; missingNames.Add(jsonName);
+                continue;
+            }
+
+            if (!nameToTransform.TryGetValue(defName, out var bone))
+            {
+                missing++; missingNames.Add(jsonName);
+                continue;
+            }
+
+            var go = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+            go.name = $"Track_{jsonName}";
+            go.transform.localScale = Vector3.one * sphereRadius * 2f;
+            go.GetComponent<Renderer>().material.color = GetBoneColor(jsonName);
+            // Parent to the DEF- bone so it follows the bone's motion
+            go.transform.SetParent(bone, false);
+            go.transform.localPosition = Vector3.zero;
+            _spheres[jsonName] = go.transform;
+            attached++;
+        }
+
+        Debug.Log($"[BonePositionVisualizer] TrackCharacterBones: attached {attached} spheres to DEF- bones, missing: {missing}" +
+                  (missing > 0 ? $" ({string.Join(", ", missingNames)})" : ""));
+    }
+
     private void CreateLines()
     {
+        if (_root == null)
+        {
+            _root = new GameObject("DebugLines").transform;
+            _root.SetParent(transform);
+        }
+
         var lineMat = new Material(Shader.Find("Unlit/Color"));
         lineMat.color = new Color(0.8f, 0.8f, 0.8f, 0.5f);
 
@@ -308,6 +418,13 @@ public class BonePositionVisualizer : MonoBehaviour
 
     void Update()
     {
+        if (trackCharacterBones)
+        {
+            // Spheres are parented to DEF- bones — just update lines
+            UpdateLines();
+            return;
+        }
+
         if (!_isPlaying || _animData == null) return;
 
         _playbackTime += Time.deltaTime;
