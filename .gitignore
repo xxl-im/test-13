@@ -1,0 +1,61 @@
+# =====================
+# Unity
+# =====================
+/[Ll]ibrary/
+/[Tt]emp/
+/[Oo]bj/
+/[Bb]uild/
+/[Bb]uilds/
+/[Ll]ogs/
+/[Uu]ser[Ss]ettings/
+
+# =====================
+# Codely
+# =====================
+.codely-cli/
+.codely.packages/
+.com-unity-codely.json
+mem-log/
+screenshots/
+
+# =====================
+# IDE / Editor
+# =====================
+.vs/
+.vsconfig
+.idea/
+*.csproj
+*.sln
+*.suo
+*.tmp
+*.user
+*.userprefs
+*.pidb
+*.booproj
+*.svd
+*.mdb
+
+# =====================
+# OS generated
+# =====================
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# =====================
+# Unity meta files should be kept (do NOT ignore *.meta)
+# But ignore meta for ignored directories
+# =====================
+
+# =====================
+# Misc
+# =====================
+*.apk
+*.aab
+*.unitypackage
+*.gz
+crashlytics-build.properties

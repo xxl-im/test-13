@@ -1,0 +1,29 @@
+# Auto-detect text files and normalize line endings
+* text=auto
+
+# Unity scene and prefab files should be merged (not binary)
+*.unity merge=unityyamlmerge text eol=lf
+*.prefab merge=unityyamlmerge text eol=lf
+*.mat merge=unityyamlmerge text eol=lf
+*.anim merge=unityyamlmerge text eol=lf
+*.controller merge=unityyamlmerge text eol=lf
+*.asset merge=unityyamlmerge text eol=lf
+
+# Binary files
+*.blend binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.tga binary
+*.psd binary
+*.wav binary
+*.mp3 binary
+*.ogg binary
+*.fbx binary
+*.obj binary
+*.dae binary
+*.3ds binary
+*.tif binary
+*.tiff binary
+*.exr binary
+*.hdr binary
