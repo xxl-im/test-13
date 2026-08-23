@@ -425,6 +425,7 @@ MonoBehaviour:
   jsonFile: {fileID: 102900000, guid: ef9175f1068a73645a9afe2caa2386dd, type: 3}
   playOnStart: 1
   loop: 1
+  usePositionBasedRotation: 1
   fingerMaxFlex: 100
   fingerMaxExtension: 15
   positionScale: 0
@@ -445,6 +446,7 @@ MonoBehaviour:
   rootOffset: {x: 2, y: 1, z: 0}
   positionScale: 1
   showLabels: 1
+  trackCharacterBones: 0
 --- !u!114 &1265581575
 MonoBehaviour:
   m_ObjectHideFlags: 0

@@ -109,35 +109,42 @@ public class BonePositionVisualizer : MonoBehaviour
     // Default finger rest offsets (from metarig: most are ~0.04 along Y, thumb differs)
     private static readonly Dictionary<string, Vector3> FingerRestOffsets = new Dictionary<string, Vector3>
     {
-        { "LeftThumbProximal",      new Vector3(0.01f, 0.00f, 0.01f) },
-        { "LeftThumbIntermediate",  new Vector3(0.00f, 0.04f, 0.00f) },
-        { "LeftIndexProximal",      new Vector3(0.00f, 0.04f, 0.00f) },
-        { "LeftIndexIntermediate",  new Vector3(0.00f, 0.03f, 0.00f) },
-        { "LeftMiddleProximal",     new Vector3(0.00f, 0.04f, 0.00f) },
-        { "LeftMiddleIntermediate", new Vector3(0.00f, 0.03f, 0.00f) },
-        { "LeftRingProximal",       new Vector3(0.00f, 0.04f, 0.00f) },
-        { "LeftRingIntermediate",   new Vector3(0.00f, 0.03f, 0.00f) },
-        { "LeftLittleProximal",     new Vector3(0.00f, 0.04f, 0.00f) },
-        { "LeftLittleIntermediate", new Vector3(0.00f, 0.02f, 0.00f) },
-        { "RightThumbProximal",      new Vector3(-0.01f, 0.00f, 0.01f) },
-        { "RightThumbIntermediate",  new Vector3(0.00f, 0.04f, 0.00f) },
-        { "RightIndexProximal",      new Vector3(0.00f, 0.04f, 0.00f) },
-        { "RightIndexIntermediate",  new Vector3(0.00f, 0.03f, 0.00f) },
-        { "RightMiddleProximal",     new Vector3(0.00f, 0.04f, 0.00f) },
-        { "RightMiddleIntermediate", new Vector3(0.00f, 0.03f, 0.00f) },
-        { "RightRingProximal",       new Vector3(0.00f, 0.04f, 0.00f) },
-        { "RightRingIntermediate",   new Vector3(0.00f, 0.03f, 0.00f) },
-        { "RightLittleProximal",     new Vector3(0.00f, 0.04f, 0.00f) },
-        { "RightLittleIntermediate", new Vector3(0.00f, 0.02f, 0.00f) },
+        { "LeftThumbProximal",      new Vector3(0.03f, 0.00f, 0.03f) },
+        { "LeftThumbIntermediate",  new Vector3(0.00f, 0.06f, 0.00f) },
+        { "LeftIndexProximal",      new Vector3(0.00f, 0.06f, 0.00f) },
+        { "LeftIndexIntermediate",  new Vector3(0.00f, 0.05f, 0.00f) },
+        { "LeftMiddleProximal",     new Vector3(0.00f, 0.06f, 0.00f) },
+        { "LeftMiddleIntermediate", new Vector3(0.00f, 0.05f, 0.00f) },
+        { "LeftRingProximal",       new Vector3(0.00f, 0.06f, 0.00f) },
+        { "LeftRingIntermediate",   new Vector3(0.00f, 0.05f, 0.00f) },
+        { "LeftLittleProximal",     new Vector3(0.00f, 0.06f, 0.00f) },
+        { "LeftLittleIntermediate", new Vector3(0.00f, 0.04f, 0.00f) },
+        { "RightThumbProximal",      new Vector3(-0.03f, 0.00f, 0.03f) },
+        { "RightThumbIntermediate",  new Vector3(0.00f, 0.06f, 0.00f) },
+        { "RightIndexProximal",      new Vector3(0.00f, 0.06f, 0.00f) },
+        { "RightIndexIntermediate",  new Vector3(0.00f, 0.05f, 0.00f) },
+        { "RightMiddleProximal",     new Vector3(0.00f, 0.06f, 0.00f) },
+        { "RightMiddleIntermediate", new Vector3(0.00f, 0.05f, 0.00f) },
+        { "RightRingProximal",       new Vector3(0.00f, 0.06f, 0.00f) },
+        { "RightRingIntermediate",   new Vector3(0.00f, 0.05f, 0.00f) },
+        { "RightLittleProximal",     new Vector3(0.00f, 0.06f, 0.00f) },
+        { "RightLittleIntermediate", new Vector3(0.00f, 0.04f, 0.00f) },
     };
 
-    // Bone connections for lines
+    // Bone connections for lines — all 32 points
     private static readonly List<(string parent, string child)> BoneConnections = new List<(string, string)>
     {
-        ("Head", "Neck"),
-        ("Neck", "RightUpperArm"),
+        // Spine chain
+        ("Hips", "Spine"),
+        ("Spine", "Chest"),
+        ("Chest", "UpperChest"),
+        ("UpperChest", "Neck"),
+        ("Neck", "Head"),
+        // Right arm
+        ("UpperChest", "RightUpperArm"),
         ("RightUpperArm", "RightLowerArm"),
         ("RightLowerArm", "RightHand"),
+        // Right fingers
         ("RightHand", "RightThumbProximal"),
         ("RightThumbProximal", "RightThumbIntermediate"),
         ("RightHand", "RightIndexProximal"),
@@ -148,6 +155,21 @@ public class BonePositionVisualizer : MonoBehaviour
         ("RightRingProximal", "RightRingIntermediate"),
         ("RightHand", "RightLittleProximal"),
         ("RightLittleProximal", "RightLittleIntermediate"),
+        // Left arm
+        ("UpperChest", "LeftUpperArm"),
+        ("LeftUpperArm", "LeftLowerArm"),
+        ("LeftLowerArm", "LeftHand"),
+        // Left fingers
+        ("LeftHand", "LeftThumbProximal"),
+        ("LeftThumbProximal", "LeftThumbIntermediate"),
+        ("LeftHand", "LeftIndexProximal"),
+        ("LeftIndexProximal", "LeftIndexIntermediate"),
+        ("LeftHand", "LeftMiddleProximal"),
+        ("LeftMiddleProximal", "LeftMiddleIntermediate"),
+        ("LeftHand", "LeftRingProximal"),
+        ("LeftRingProximal", "LeftRingIntermediate"),
+        ("LeftHand", "LeftLittleProximal"),
+        ("LeftLittleProximal", "LeftLittleIntermediate"),
     };
 
     #region JSON Data Structures
@@ -260,51 +282,16 @@ public class BonePositionVisualizer : MonoBehaviour
                     boneNames.Add(bp.bone_name);
         }
 
-        // Two-pass creation:
-        // Pass 1: create root-space bones (those with local_position) as flat children of root
-        // Pass 2: create finger bones (without local_position) as children of their parent hand
+        // Create ALL spheres as flat children of root (no nesting)
         foreach (var boneName in boneNames)
         {
-            bool isFinger = FingerRestOffsets.ContainsKey(boneName);
-            if (isFinger) continue; // skip for now, create in pass 2
-
             var go = GameObject.CreatePrimitive(PrimitiveType.Sphere);
             go.name = boneName;
             go.transform.localScale = Vector3.one * sphereRadius * 2f;
             go.transform.SetParent(_root, false);
             go.transform.localPosition = Vector3.zero;
-            go.GetComponent<Renderer>().material.color = GetBoneColor(boneName);
-            _spheres[boneName] = go.transform;
-        }
-
-        // Pass 2: create finger bones as children of their parent
-        foreach (var boneName in boneNames)
-        {
-            if (!FingerRestOffsets.ContainsKey(boneName)) continue;
-
-            Transform parentSphere = null;
-            if (BoneParents.TryGetValue(boneName, out var parentName))
-                _spheres.TryGetValue(parentName, out parentSphere);
-
-            var go = GameObject.CreatePrimitive(PrimitiveType.Sphere);
-            go.name = boneName;
-            go.transform.localScale = Vector3.one * sphereRadius * 2f;
-            go.GetComponent<Renderer>().material.color = GetBoneColor(boneName);
-
-            if (parentSphere != null)
-            {
-                go.transform.SetParent(parentSphere, false);
-                go.transform.localPosition = FingerRestOffsets[boneName];
-            }
-            else
-            {
-                // Parent hand bone is missing from JSON (e.g., LeftHand not in data)
-                // Attach to root as fallback
-                go.transform.SetParent(_root, false);
-                go.transform.localPosition = Vector3.zero;
-            }
             go.transform.localRotation = Quaternion.identity;
-
+            go.GetComponent<Renderer>().material.color = GetBoneColor(boneName);
             _spheres[boneName] = go.transform;
         }
 
@@ -462,27 +449,73 @@ public class BonePositionVisualizer : MonoBehaviour
 
         if (f0?.bone_poses == null) return;
 
+        // First pass: collect interpolated positions for ALL bones that have local_position
+        var jsonPositions = new Dictionary<string, Vector3>();
+        foreach (var bp0 in f0.bone_poses)
+        {
+            if (string.IsNullOrEmpty(bp0.bone_name)) continue;
+            if (bp0.local_position == null || bp0.local_position.Length < 3) continue;
+
+            var p0 = new Vector3(bp0.local_position[0], bp0.local_position[1], bp0.local_position[2]) * positionScale;
+            f1Lookup.TryGetValue(bp0.bone_name, out var bp1);
+            var p1 = bp1?.local_position != null
+                ? new Vector3(bp1.local_position[0], bp1.local_position[1], bp1.local_position[2]) * positionScale
+                : p0;
+            jsonPositions[bp0.bone_name] = Vector3.Lerp(p0, p1, t);
+        }
+
+        // Second pass: apply positions
         foreach (var bp0 in f0.bone_poses)
         {
             if (string.IsNullOrEmpty(bp0.bone_name)) continue;
             if (!_spheres.TryGetValue(bp0.bone_name, out var sphere)) continue;
 
-            f1Lookup.TryGetValue(bp0.bone_name, out var bp1);
-            bp1 = bp1 ?? bp0;
-
             bool isFinger = FingerRestOffsets.ContainsKey(bp0.bone_name);
 
-            // Position: only for root-space bones (non-finger, has local_position)
-            if (!isFinger && bp0.local_position != null && bp0.local_position.Length >= 3)
+            if (isFinger)
             {
-                var p0 = new Vector3(bp0.local_position[0], bp0.local_position[1], bp0.local_position[2]) * positionScale;
-                var p1 = bp1.local_position != null
-                    ? new Vector3(bp1.local_position[0], bp1.local_position[1], bp1.local_position[2]) * positionScale
-                    : p0;
-                sphere.localPosition = Vector3.Lerp(p0, p1, t);
+                // Finger bones have no local_position — derive from parent hand position + offset
+                string parentName = null;
+                BoneParents.TryGetValue(bp0.bone_name, out parentName);
+
+                Vector3 parentPos = Vector3.zero;
+                bool hasParentPos = false;
+                if (parentName != null && jsonPositions.TryGetValue(parentName, out var pp))
+                {
+                    parentPos = pp;
+                    hasParentPos = true;
+                }
+
+                if (!hasParentPos && parentName != null && _spheres.TryGetValue(parentName, out var parentSphere))
+                {
+                    parentPos = parentSphere.localPosition;
+                    hasParentPos = true;
+                }
+
+                if (hasParentPos)
+                {
+                    // For intermediate joints, chain from proximal joint position
+                    if (bp0.bone_name.Contains("Intermediate"))
+                    {
+                        string proximalName = bp0.bone_name.Replace("Intermediate", "Proximal");
+                        if (jsonPositions.TryGetValue(proximalName, out var proxPos))
+                            parentPos = proxPos;
+                        else if (_spheres.TryGetValue(proximalName, out var proxSphere))
+                            parentPos = proxSphere.localPosition;
+                    }
+
+                    sphere.localPosition = parentPos + FingerRestOffsets[bp0.bone_name];
+                }
+            }
+            else if (jsonPositions.TryGetValue(bp0.bone_name, out var pos))
+            {
+                sphere.localPosition = pos;
             }
 
             // Rotation: apply to all bones that have local_rotation
+            f1Lookup.TryGetValue(bp0.bone_name, out var bp1);
+            bp1 = bp1 ?? bp0;
+
             if (bp0.local_rotation != null && bp0.local_rotation.Length >= 4)
             {
                 var r0 = new Quaternion(bp0.local_rotation[0], bp0.local_rotation[1],

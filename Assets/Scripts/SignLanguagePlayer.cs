@@ -501,17 +501,19 @@ public class SignLanguagePlayer : MonoBehaviour
 
             var jsonRot = Quaternion.Slerp(q0, q1, t);
 
-            Quaternion delta = jsonRot;
-            if (_jsonFrame0Rotations.TryGetValue(bp0.bone_name, out var frame0Rot))
-                delta = Quaternion.Inverse(frame0Rot) * jsonRot;
-
+            // Apply absolute rotation directly (not delta-from-frame-0)
             if (IsFingerBone(bp0.bone_name))
+            {
+                // For fingers: compute delta from frame 0 for clamping, then reconstruct absolute
+                Quaternion delta = jsonRot;
+                if (_jsonFrame0Rotations.TryGetValue(bp0.bone_name, out var frame0Rot))
+                    delta = Quaternion.Inverse(frame0Rot) * jsonRot;
                 delta = clampFingerRotation(delta, bp0.bone_name);
+                if (_jsonFrame0Rotations.TryGetValue(bp0.bone_name, out var f0Rot))
+                    jsonRot = delta * f0Rot;
+            }
 
-            if (_initialLocalRotations.TryGetValue(bone, out var restRot))
-                bone.localRotation = delta * restRot;
-            else
-                bone.localRotation = delta;
+            bone.localRotation = jsonRot;
 
             writtenBones.Add(bone);
         }
@@ -544,17 +546,19 @@ public class SignLanguagePlayer : MonoBehaviour
 
                 var jsonRot = Quaternion.Slerp(q0, q1, t);
 
-                Quaternion delta = jsonRot;
-                if (_jsonFrame0Rotations.TryGetValue(bp0.bone_name, out var frame0Rot))
-                    delta = Quaternion.Inverse(frame0Rot) * jsonRot;
-
+                // Apply absolute rotation directly (not delta-from-frame-0)
                 if (IsFingerBone(bp0.bone_name))
+                {
+                    // For fingers: compute delta from frame 0 for clamping, then reconstruct absolute
+                    Quaternion delta = jsonRot;
+                    if (_jsonFrame0Rotations.TryGetValue(bp0.bone_name, out var frame0Rot))
+                        delta = Quaternion.Inverse(frame0Rot) * jsonRot;
                     delta = clampFingerRotation(delta, bp0.bone_name);
+                    if (_jsonFrame0Rotations.TryGetValue(bp0.bone_name, out var f0Rot))
+                        jsonRot = delta * f0Rot;
+                }
 
-                if (_initialLocalRotations.TryGetValue(bone, out var restRot))
-                    bone.localRotation = delta * restRot;
-                else
-                    bone.localRotation = delta;
+                bone.localRotation = jsonRot;
             }
 
             // Apply position delta (if enabled and data exists)
