@@ -1,12 +1,9 @@
-"""
-Coffee right-middle-finger refinement for a baked Blender animation.
+"""Coffee hand-shape and elbow-height refinement for a baked animation.
 
-Run this script in Blender after the MediaPipe/JSON motion has already been
-applied and baked to the character rig.  It keeps the character's right index
-finger straight in the global XOY plane and the middle finger straight in the
-global negative Z direction. It also rotates the root phalanges of the right
-ring and little fingers down toward global negative Z. The wrist and arms are
-intentionally left unchanged.
+Run this after the MediaPipe/JSON motion has already been applied and baked to
+the Rigify character rig. It corrects the right-hand finger pose, then lowers
+both elbow regions while preserving each wrist's evaluated world height.
+No wrist rotation is written by this script.
 """
 
 import bpy
@@ -22,7 +19,26 @@ INDEX_FINGER_CHILDREN = ("DEF-f_index.02.R", "DEF-f_index.03.R")
 RING_FINGER_BASE = "DEF-f_ring.01.R"
 PINKY_FINGER_BASE = "DEF-f_pinky.01.R"
 TARGET_WORLD_DIRECTION = Vector((0.0, 0.0, -1.0))
-OUTPUT_FILE_NAME = "CoffeeRingPinkyBase.blend"
+# The evaluated mesh is driven by this DEF chain rather than by the visible
+# Rigify tweak controls. The first upper-arm segment remains unchanged; the
+# second segment supplies the lowered elbow, while the forearm is rebuilt to
+# meet the original wrist endpoint.
+ARM_CHAINS = {
+    "L": (
+        "DEF-upper_arm.L.001",
+        "DEF-forearm.L",
+        "DEF-forearm.L.001",
+        "DEF-hand.L",
+    ),
+    "R": (
+        "DEF-upper_arm.R.001",
+        "DEF-forearm.R",
+        "DEF-forearm.R.001",
+        "DEF-hand.R",
+    ),
+}
+ELBOW_WORLD_OFFSET = Vector((0.0, 0.0, -0.04))
+OUTPUT_FILE_NAME = "CoffeeElbowHeight.blend"
 
 
 def find_rig():
@@ -119,12 +135,128 @@ def apply_coffee_hand_refinement(rig, frame_start, frame_end):
     bpy.ops.object.mode_set(mode="OBJECT")
 
 
+def prepare_arm_deform_bones(rig):
+    """Release only the direct arm deformation chain for manual keyframing."""
+    prepared = {}
+    for side, bone_names in ARM_CHAINS.items():
+        bones = []
+        for bone_name in bone_names:
+            bone = rig.pose.bones.get(bone_name)
+            if bone is None:
+                raise RuntimeError("Missing arm deform bone: " + bone_name)
+            for constraint in bone.constraints:
+                constraint.mute = True
+            bone.lock_rotation = (False, False, False)
+            bone.lock_scale = (False, False, False)
+            bone.rotation_mode = "XYZ"
+            bones.append(bone)
+        prepared[side] = bones
+    return prepared
+
+
+def point_bone_tail_at(bone, target_point):
+    """Aim a bone's local Y axis at a point and match its effective length."""
+    # Parent-scale inheritance makes a one-shot local scale estimate slightly
+    # inaccurate. Iterate on the evaluated tail so the world-space endpoint is
+    # aligned precisely, while X/Z scale remain unchanged.
+    for _ in range(6):
+        head = bone.head.copy()
+        target_vector = target_point - head
+        if target_vector.length < 0.00001:
+            raise RuntimeError("Cannot aim zero-length bone: " + bone.name)
+
+        align_bone_y_axis_to_world_direction(bone, target_vector.normalized())
+        bpy.context.view_layer.update()
+        current_length = (bone.tail - bone.head).length
+        if current_length < 0.00001:
+            raise RuntimeError("Invalid evaluated length for bone: " + bone.name)
+        bone.scale.y *= target_vector.length / current_length
+        bpy.context.view_layer.update()
+
+        if (bone.tail - target_point).length < 0.00001:
+            break
+
+
+def insert_arm_transform_keys(bone, frame_index):
+    bone.keyframe_insert(data_path="location", frame=frame_index)
+    bone.keyframe_insert(data_path="rotation_euler", frame=frame_index)
+    bone.keyframe_insert(data_path="scale", frame=frame_index)
+
+
+def sample_arm_targets(rig, frame_start, frame_end):
+    """Capture constrained elbow and wrist poses before releasing the chain."""
+    samples = {}
+    for frame_index in range(frame_start, frame_end + 1):
+        bpy.context.scene.frame_set(frame_index)
+        frame_samples = {}
+        for side, bone_names in ARM_CHAINS.items():
+            upper_end, forearm_a, forearm_b, hand = (
+                rig.pose.bones[name] for name in bone_names
+            )
+            frame_samples[side] = {
+                "elbow": upper_end.tail.copy(),
+                "wrist": hand.head.copy(),
+                "hand_matrix": hand.matrix.copy(),
+            }
+        samples[frame_index] = frame_samples
+    return samples
+
+
+def apply_elbow_height_refinement(rig, frame_start, frame_end):
+    """Lower elbows while preserving the evaluated world wrist endpoints."""
+    bpy.context.view_layer.objects.active = rig
+    bpy.ops.object.mode_set(mode="POSE")
+    samples = sample_arm_targets(rig, frame_start, frame_end)
+    arms = prepare_arm_deform_bones(rig)
+
+    for frame_index in range(frame_start, frame_end + 1):
+        bpy.context.scene.frame_set(frame_index)
+        for side, (upper_end, forearm_a, forearm_b, hand) in arms.items():
+            sample = samples[frame_index][side]
+            lowered_elbow = sample["elbow"] + ELBOW_WORLD_OFFSET
+
+            point_bone_tail_at(upper_end, lowered_elbow)
+            insert_arm_transform_keys(upper_end, frame_index)
+            bpy.context.view_layer.update()
+
+            # The two forearm segments span from the lowered elbow to the
+            # sampled wrist point. This keeps the wrist position unchanged.
+            wrist_point = sample["wrist"]
+            forearm_vector = wrist_point - forearm_a.head
+            if forearm_vector.length < 0.00001:
+                raise RuntimeError("Invalid forearm vector for side " + side)
+            total_rest_length = forearm_a.bone.length + forearm_b.bone.length
+            scale = forearm_vector.length / total_rest_length
+
+            first_forearm_end = (
+                forearm_a.head
+                + forearm_vector.normalized() * forearm_a.bone.length * scale
+            )
+            point_bone_tail_at(forearm_a, first_forearm_end)
+            insert_arm_transform_keys(forearm_a, frame_index)
+            bpy.context.view_layer.update()
+
+            point_bone_tail_at(forearm_b, wrist_point)
+            insert_arm_transform_keys(forearm_b, frame_index)
+            bpy.context.view_layer.update()
+
+            # Preserve the original wrist orientation. Its connected head is
+            # already at wrist_point, so this does not move the wrist.
+            hand.matrix = sample["hand_matrix"]
+            insert_arm_transform_keys(hand, frame_index)
+            bpy.context.view_layer.update()
+
+    bpy.context.view_layer.update()
+    bpy.ops.object.mode_set(mode="OBJECT")
+
+
 rig = find_rig()
 frame_start, frame_end = motion_frame_range(rig)
 apply_coffee_hand_refinement(rig, frame_start, frame_end)
+apply_elbow_height_refinement(rig, frame_start, frame_end)
 
-# Save a separate named copy for review.  The original source asset is never
-# overwritten by this first refinement step.
+# Save a separate named copy for review. The input source asset is never
+# overwritten.
 current_directory = Path(bpy.path.abspath("//"))
 output_path = current_directory / OUTPUT_FILE_NAME
 bpy.context.scene.frame_set(frame_start)
